@@ -63,6 +63,30 @@ class EventLevel(str, Enum):
     CRITICAL = "CRITICAL"
 
 
+class AgentRole(str, Enum):
+    ADMIN = "admin"
+    SUPERVISOR = "supervisor"
+    SQL_AGENT = "sql_agent"
+    FS_AGENT = "fs_agent"
+    DIAGNOSTIC_AGENT = "diagnostic_agent"
+    EXTERNAL_AGENT = "external_agent"
+    GENERAL = "general"
+    GUEST = "guest"
+
+
+# ── Agent Identity & RBAC ─────────────────────────────────────────────────────
+
+class AgentIdentity(BaseModel):
+    agent_id: str
+    role: AgentRole = AgentRole.GENERAL
+    parent_agent_id: Optional[str] = None
+    allowed_tools: Optional[List[str]] = None
+    read_only: bool = False
+    max_risk_level: RiskLevel = RiskLevel.CRITICAL
+    created_at: datetime = Field(default_factory=_now)
+    ttl_seconds: Optional[int] = None
+
+
 # ── Actions ───────────────────────────────────────────────────────────────────
 
 class ActionRequest(BaseModel):
@@ -73,6 +97,10 @@ class ActionRequest(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict)
     data_classification: str = "internal"
     reversible: bool = True
+    agent_id: str = "default_agent"
+    agent_role: str = "general"
+    delegator_agent_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
 
 
 class ActionResult(BaseModel):
@@ -81,6 +109,7 @@ class ActionResult(BaseModel):
     output: Any = None
     error: Optional[str] = None
     duration_ms: Optional[float] = None
+    idempotent_cached: bool = False
 
 
 # ── JEV ───────────────────────────────────────────────────────────────────────
@@ -166,6 +195,9 @@ class AuditEvent(BaseModel):
     decision: Optional[Dict[str, Any]] = None
     execution: Optional[Dict[str, Any]] = None
     metadata: Dict[str, Any] = Field(default_factory=lambda: {"schema_version": "1.0"})
+    sequence_number: int = 0
+    prev_hash: Optional[str] = None
+    event_hash: Optional[str] = None
 
     def to_jsonl(self) -> str:
         import json

@@ -6,7 +6,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 
 class LLMConfig(BaseModel):
@@ -19,12 +19,12 @@ class LLMConfig(BaseModel):
 
 
 class JEVConfig(BaseModel):
-    provider: str = Field(default="mock")  # "mock", "openrouter", "jev"
+    provider: str = Field(default="openrouter")  # "mock", "openrouter", "jev"
     endpoint: Optional[str] = Field(default=None)
     api_key: Optional[str] = Field(default=None)
-    model: str = Field(default="typesafe/jev-1.13")
+    model: str = Field(default="google/gemini-2.0-flash-001")
     timeout_seconds: float = Field(default=10.0)
-    mock_mode: bool = Field(default=True)
+    mock_mode: bool = Field(default=False)
     max_retries: int = Field(default=2)
     allow_threshold: float = Field(default=0.1)
     block_threshold: float = Field(default=0.9)
@@ -58,7 +58,7 @@ class AURAConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> "AURAConfig":
-        load_dotenv(override=True)
+        load_dotenv(override=False)
         openrouter_key = os.getenv("OPENROUTER_API_KEY")
         if openrouter_key and ("your-openrouter" in openrouter_key.lower() or "your-key" in openrouter_key.lower() or not openrouter_key.strip()):
             openrouter_key = None

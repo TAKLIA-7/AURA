@@ -1,115 +1,107 @@
-"""AURA Textual CSS theme."""
+"""AURA Textual CSS theme — modern cyber-aesthetic design system."""
 
 AURA_CSS = """
 Screen {
-    background: #0a0a12;
+    background: #080812;
 }
 
 Header {
-    background: #0d0d1f;
-    color: #00FFFF;
+    background: #0c0c1e;
+    color: #00e5ff;
     height: 3;
 }
 
 Footer {
-    background: #0d0d1f;
-    color: #888899;
+    background: #0c0c1e;
+    color: #8888aa;
     height: 1;
 }
 
 TabbedContent {
-    background: #0a0a12;
+    background: #080812;
     height: 1fr;
 }
 
 Tabs {
-    background: #0a0a18;
+    background: #0b0b1c;
     height: 3;
-    border-bottom: solid #1a1a30;
+    border-bottom: solid #1e1e38;
 }
 
 Tab {
-    color: #666688;
+    color: #777799;
     padding: 0 2;
     height: 3;
-    background: #0a0a18;
+    background: #0b0b1c;
+    text-style: none;
+    transition: color 150ms;
 }
 
 Tab:hover {
-    color: #00FFFF;
-    background: #14142a;
+    color: #00e5ff;
+    background: #14142f;
 }
 
 Tab.-active {
-    color: #00FFFF;
-    background: #1a1a35;
+    color: #00e5ff;
+    background: #181836;
     text-style: bold;
-    border-bottom: tall #00FFFF;
+    border-bottom: tall #00e5ff;
 }
 
 TabPane {
-    background: #0a0a12;
+    background: #080812;
     padding: 0;
     height: 1fr;
 }
 
-
-.nav-tab:hover {
-    color: #00FFFF;
-}
-
-.nav-tab.active {
-    color: #00FFFF;
-    background: #1a1a2e;
-    text-style: bold;
-}
-
 .panel {
     border: solid #222244;
-    background: #0d0d20;
+    background: #0d0d22;
     padding: 1 2;
 }
 
 .panel-title {
-    color: #00FFFF;
+    color: #00e5ff;
     text-style: bold;
 }
 
 .status-bar {
-    background: #0a0a18;
-    color: #888899;
+    background: #060610;
+    color: #8888aa;
     height: 1;
     padding: 0 1;
+    border-top: solid #1c1c34;
 }
 
 .jev-badge {
-    color: #AA44FF;
+    color: #c084fc;
 }
 
 .success {
-    color: #00CC88;
+    color: #10b981;
 }
 
 .warning {
-    color: #FFAA00;
+    color: #f59e0b;
 }
 
 .error {
-    color: #FF4444;
+    color: #f43f5e;
 }
 
 .blocked {
-    color: #FF4444;
+    color: #f43f5e;
     text-style: bold;
 }
 
 .allowed {
-    color: #00CC88;
+    color: #10b981;
     text-style: bold;
 }
 
 .pending {
-    color: #FFAA00;
+    color: #f59e0b;
 }
 
 .muted {
@@ -117,98 +109,136 @@ TabPane {
 }
 
 .agent-text {
-    color: #DDEEFF;
+    color: #e2e8f0;
 }
 
 .user-text {
-    color: #AACCFF;
+    color: #93c5fd;
     text-style: bold;
 }
 
 .tool-name {
-    color: #00FFFF;
+    color: #00e5ff;
     text-style: bold;
 }
 
 .risk-high {
-    color: #FF4444;
+    color: #f43f5e;
 }
 
 .risk-medium {
-    color: #FFAA00;
+    color: #f59e0b;
 }
 
 .risk-low {
-    color: #00CC88;
+    color: #10b981;
 }
 
 .risk-none {
-    color: #555577;
+    color: #64748b;
 }
 
 Input {
-    background: #0d0d20;
-    border: tall #222244;
-    color: #DDEEFF;
+    background: #0e0e24;
+    border: tall #232348;
+    color: #f1f5f9;
     padding: 0 2;
 }
 
 Input:focus {
-    border: tall #00FFFF;
+    border: tall #00e5ff;
 }
 
 Button {
-    background: #1a1a30;
-    color: #00FFFF;
-    border: solid #222244;
+    background: #161632;
+    color: #00e5ff;
+    border: solid #282852;
+    min-height: 1;
+    padding: 0 2;
+    text-style: bold;
 }
 
 Button:hover {
-    background: #222244;
-    border: solid #00FFFF;
+    background: #242450;
+    border: solid #00e5ff;
+    color: #ffffff;
 }
 
 Button.danger {
-    background: #300010;
-    color: #FF4444;
-    border: solid #440022;
+    background: #350818;
+    color: #f43f5e;
+    border: solid #551228;
 }
 
 Button.danger:hover {
-    background: #440022;
-    border: solid #FF4444;
+    background: #551228;
+    border: solid #f43f5e;
+    color: #ffffff;
 }
 
 Button.success {
-    background: #003020;
-    color: #00CC88;
-    border: solid #004433;
+    background: #08281a;
+    color: #10b981;
+    border: solid #12442e;
+}
+
+Button.success:hover {
+    background: #12442e;
+    border: solid #10b981;
+    color: #ffffff;
 }
 
 DataTable {
-    background: #0d0d20;
+    background: #0c0c20;
+    border: solid #1e1e3a;
 }
 
 DataTable > .datatable--header {
-    background: #0a0a18;
-    color: #00FFFF;
+    background: #0f0f2a;
+    color: #00e5ff;
     text-style: bold;
 }
 
 DataTable > .datatable--cursor {
-    background: #1a1a35;
+    background: #1e1e48;
+    color: #ffffff;
 }
 
 RichLog {
-    background: #0d0d20;
-    border: solid #1a1a30;
+    background: #080816;
+    border: solid #1a1a36;
 }
 
 Label {
-    color: #AABBCC;
+    color: #94a3b8;
 }
 
-/* Input style variations adapted from create-agent-tui */
+/* Quick Action Suggestion Chips */
+#quick-actions-bar {
+    height: 3;
+    padding: 0 1;
+    layout: horizontal;
+    background: #0b0b1c;
+    border-top: solid #1c1c34;
+}
+
+.quick-chip {
+    height: 1;
+    margin: 1 1 0 0;
+    min-width: 14;
+    background: #12122c;
+    color: #93c5fd;
+    border: solid #222248;
+    padding: 0 1;
+}
+
+.quick-chip:hover {
+    background: #1d1d44;
+    border: solid #00e5ff;
+    color: #00e5ff;
+}
+
+/* Input style variations */
 .input-bordered {
     background: transparent;
     border: none;
@@ -216,12 +246,13 @@ Label {
 }
 
 .input-block {
-    background: #0d0d22;
-    border: tall #222244;
+    background: #0e0e24;
+    border: tall #232348;
     padding: 0 1;
 }
+
 .input-block:focus-within {
-    border: tall #00FFFF;
+    border: tall #00e5ff;
 }
 
 .input-plain {
@@ -231,15 +262,15 @@ Label {
 }
 
 .chip-tag {
-    background: #14142a;
-    color: #00FFFF;
+    background: #161634;
+    color: #00e5ff;
     padding: 0 1;
     margin-right: 1;
 }
 
 .chip-dim {
-    background: #101020;
-    color: #666688;
+    background: #111124;
+    color: #64748b;
     padding: 0 1;
 }
 """

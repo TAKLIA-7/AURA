@@ -15,8 +15,10 @@ from aura.observability import (
     JSONLLogger, get_event_bus, get_metrics, get_run_repo,
 )
 from aura.jev import JEVClient, JEVContextBuilder, MockJEVClient, OpenRouterJEVClient
-from aura.policies import PolicyEngine, ApprovalManager
+from aura.policies import PolicyEngine, ApprovalManager, AgentRBACManager, MonotonePolicyEngine
+from aura.gateway import IdempotencyManager
 from aura.gateway import ToolRegistry, ToolExecutor
+from aura.agent.swarm import SwarmCoordinator, SwarmMember, STANDARD_SWARM_ROSTER
 
 
 class AgentMessage:
@@ -455,7 +457,13 @@ class AURAOrchestrator:
         self.jsonl_logger = JSONLLogger(config.runtime.data_dir / "logs")
 
         self.registry = ToolRegistry(config.runtime.workspace_root)
-        self.executor = ToolExecutor(self.registry)
+        self.idempotency_manager = IdempotencyManager()
+        self.rbac_manager = AgentRBACManager()
+        self.monotone_engine = MonotonePolicyEngine()
+        self.executor = ToolExecutor(self.registry, idempotency_manager=self.idempotency_manager)
+
+        from aura.agent.swarm import SwarmCoordinator
+        self.swarm_coordinator = SwarmCoordinator(self)
 
         # JEV Client selection
         if not config.jev.mock_mode and config.jev.api_key:
@@ -476,7 +484,7 @@ class AURAOrchestrator:
                     timeout=config.jev.timeout_seconds,
                 )
                 self.jev_mode = "live"
-        elif config.jev.provider in ("openrouter", "jev") and config.jev.api_key:
+        elif not config.jev.mock_mode and config.jev.provider in ("openrouter", "jev") and config.jev.api_key:
             self.jev_client = OpenRouterJEVClient(
                 api_key=config.jev.api_key,
                 model=config.jev.model,
@@ -491,7 +499,11 @@ class AURAOrchestrator:
             self.jev_mode = "mock"
 
         self.context_builder = JEVContextBuilder()
-        self.policy_engine = PolicyEngine(config.runtime.workspace_root)
+        self.policy_engine = PolicyEngine(
+            config.runtime.workspace_root,
+            rbac_manager=self.rbac_manager,
+            monotone_engine=self.monotone_engine,
+        )
         self.approval_manager = ApprovalManager()
 
         # LLM Provider selection
@@ -551,10 +563,21 @@ class AURAOrchestrator:
             self.metrics.jev_connected = False
             return False
 
+    async def run_swarm(
+        self,
+        prompt: str,
+        conversation_history: Optional[List[Dict]] = None,
+    ) -> AsyncGenerator[AgentMessage, None]:
+        """Execute a multi-agent swarm collaborative workflow with specialized specialists."""
+        async for msg in self.swarm_coordinator.execute_swarm(prompt, conversation_history):
+            yield msg
+
     async def run(
         self,
         prompt: str,
         conversation_history: Optional[List[Dict]] = None,
+        agent_id: str = "default_agent",
+        agent_role: str = "general",
     ) -> AsyncGenerator[AgentMessage, None]:
         self._cancelled = False
         run = RunRecord(
@@ -652,6 +675,8 @@ class AURAOrchestrator:
                         tool=tool_name,
                         arguments=args,
                         target=str(args.get("path") or args.get("target") or ""),
+                        agent_id=agent_id,
+                        agent_role=agent_role,
                     )
                     request = self.registry.enrich_request(request)
                     run.total_tool_calls += 1
@@ -945,6 +970,3 @@ class AURAOrchestrator:
                 metadata={"schema_version": "1.0", "error": str(e)},
             ))
             yield AgentMessage("run_failed", {"error": str(e), "run_id": run.run_id})
-
-    def cancel(self) -> None:
-        self._cancelled = True

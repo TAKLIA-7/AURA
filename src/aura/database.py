@@ -1,11 +1,16 @@
 """AURA SQLite Database subsystem — sample employee database and query execution."""
 from __future__ import annotations
 import os
+import re
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 DEFAULT_DB_PATH = Path("./data/employees.db")
+
+DANGEROUS_SQL_KEYWORDS = {
+    "DROP", "ALTER", "TRUNCATE", "GRANT", "REVOKE", "ATTACH", "DETACH", "VACUUM"
+}
 
 
 def get_db_path() -> Path:
@@ -21,7 +26,6 @@ def get_db_path() -> Path:
             p = DEFAULT_DB_PATH
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
-
 
 
 def init_sample_database(db_path: Optional[Path] = None) -> Path:
@@ -107,7 +111,6 @@ def format_sql_cli_table(columns: List[str], rows: List[List[Any]], rows_affecte
             if v is None:
                 formatted_row.append("NULL")
             elif isinstance(v, float):
-                # If it's a salary-like number, format cleanly
                 if v.is_integer():
                     formatted_row.append(str(int(v)))
                 else:
@@ -135,11 +138,52 @@ def format_sql_cli_table(columns: List[str], rows: List[List[Any]], rows_affecte
     return "\n".join(lines)
 
 
-def run_sqlite_query(query: str, db_path: Optional[Path] = None) -> Dict[str, Any]:
-    """Execute an SQL query against the SQLite database and return structured results + CLI table."""
+def validate_sql_security(query: str, read_only: bool = False) -> Tuple[bool, Optional[str]]:
+    """Validate query against SQL injection, stacked ingestion attacks, and destructive DDL."""
+    q = query.strip()
+    if not q:
+        return False, "Empty SQL query"
+
+    # Block stacked/multi-statement queries
+    statements = [s.strip() for s in q.split(";") if s.strip()]
+    if len(statements) > 1:
+        return False, "Multi-statement SQL queries are blocked by AURA security policy"
+
+    clean_query = statements[0]
+    tokens = set(re.findall(r"\b[A-Z_]+\b", clean_query.upper()))
+
+    # Check for dangerous keywords
+    for keyword in DANGEROUS_SQL_KEYWORDS:
+        if keyword in tokens:
+            return False, f"Dangerous SQL keyword '{keyword}' is blocked by AURA security policy"
+
+    first_word = clean_query.split()[0].upper()
+    if read_only and first_word not in ("SELECT", "PRAGMA", "EXPLAIN", "WITH"):
+        return False, f"SQL Agent is operating in read-only mode; mutating statement '{first_word}' is blocked"
+
+    return True, None
+
+
+def run_sqlite_query(
+    query: str,
+    params: Optional[Union[List[Any], Tuple[Any, ...]]] = None,
+    db_path: Optional[Path] = None,
+    read_only: bool = False,
+) -> Dict[str, Any]:
+    """Execute a parameterized SQL query against SQLite with security validation and tabular formatting."""
     path = db_path or get_db_path()
     if not path.exists():
         init_sample_database(path)
+
+    # Security validation against injection and ingestion attacks
+    is_valid, sec_error = validate_sql_security(query, read_only=read_only)
+    if not is_valid:
+        return {
+            "success": False,
+            "query": query,
+            "error": sec_error,
+            "table": f"SECURITY BLOCKED: {sec_error}",
+        }
 
     query_stripped = query.strip()
     is_select = query_stripped.upper().startswith(("SELECT", "PRAGMA", "EXPLAIN", "WITH"))
@@ -148,7 +192,8 @@ def run_sqlite_query(query: str, db_path: Optional[Path] = None) -> Dict[str, An
     cursor = conn.cursor()
 
     try:
-        cursor.execute(query)
+        bind_params = tuple(params) if params is not None else ()
+        cursor.execute(query, bind_params)
         if is_select:
             columns = [desc[0] for desc in cursor.description] if cursor.description else []
             rows = cursor.fetchall()
@@ -164,7 +209,6 @@ def run_sqlite_query(query: str, db_path: Optional[Path] = None) -> Dict[str, An
                 "row_count": len(row_list),
                 "table": table_str,
             }
-
         else:
             conn.commit()
             rows_affected = cursor.rowcount

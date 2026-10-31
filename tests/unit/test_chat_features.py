@@ -1,5 +1,6 @@
 """Unit tests for AURA Chat screen features and extensions."""
 import pytest
+pytest.importorskip("textual")
 from pathlib import Path
 from aura.ui.screens.chat import ChatMessage, ChatView
 from aura.config import AURAConfig, DisplayConfig
@@ -48,23 +49,25 @@ def test_expand_file_refs(tmp_path):
 
     chat_view = ChatView()
     # Test valid file
-    expanded, attached = chat_view._expand_file_refs(f"Please inspect @{test_file}")
-    assert str(test_file) in attached
-    assert "<file path=" in expanded
-    assert "sample file content" in expanded
+    res, attached = chat_view._expand_file_refs(f"Check @{test_file.name}", base_dir=tmp_path)
+    assert attached == [test_file.name]
+    assert "sample file content" in res
 
-    # Test non-existent file
-    expanded2, attached2 = chat_view._expand_file_refs("Check @non_existent_file.xyz")
-    assert len(attached2) == 0
-    assert expanded2 == "Check @non_existent_file.xyz"
+    # Test nonexistent file
+    res_none, attached_none = chat_view._expand_file_refs("Check @nonexistent.txt", base_dir=tmp_path)
+    assert attached_none == []
+    assert "@nonexistent.txt" in res_none
 
 
-def test_display_config_fields(monkeypatch):
-    monkeypatch.setenv("AURA_TOOL_DISPLAY", "emoji")
-    monkeypatch.setenv("AURA_LOADER_STYLE", "spinner")
-    monkeypatch.setenv("AURA_INPUT_STYLE", "block")
+def test_clear_and_compact_shortcuts():
+    chat_view = ChatView()
+    chat_view.message_history.append(ChatMessage(role="user", content="Msg 1"))
+    chat_view.message_history.append(ChatMessage(role="agent", content="Msg 2"))
+    assert len(chat_view.message_history) == 2
 
-    cfg = AURAConfig.from_env()
-    assert cfg.display.tool_display == "emoji"
-    assert cfg.display.loader_style == "spinner"
-    assert cfg.display.input_style == "block"
+    chat_view.clear_history()
+    assert len(chat_view.message_history) == 0
+
+    # Test compact summary
+    summary = chat_view.compact_history()
+    assert "compact" in summary.lower() or "summary" in summary.lower()

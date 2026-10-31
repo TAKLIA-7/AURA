@@ -1,6 +1,7 @@
-"""AURA observability — event bus, JSONL logging, metrics, run repository."""
+"""AURA observability — event bus, JSONL logging, metrics, run repository, hash chain."""
 from __future__ import annotations
 import asyncio
+import inspect
 import json
 import time
 from collections import defaultdict, deque
@@ -8,6 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from aura.models import AuditEvent, EventLevel, RunRecord, RunStatus
+from aura.observability.hash_chain import (
+    GENESIS_HASH, compute_event_hash, verify_audit_log_chain,
+)
 
 
 # ── Event Bus ─────────────────────────────────────────────────────────────────
@@ -30,7 +34,7 @@ class EventBus:
         handlers = self._subscribers.get(event.event_type, []) + self._any_subscribers
         for handler in handlers:
             try:
-                if asyncio.iscoroutinefunction(handler):
+                if inspect.iscoroutinefunction(handler):
                     await handler(event)
                 else:
                     handler(event)
@@ -48,7 +52,7 @@ def get_event_bus() -> EventBus:
     return _event_bus
 
 
-# ── JSONL Logger ──────────────────────────────────────────────────────────────
+# ── JSONL Logger with Cryptographic Hash Chain ────────────────────────────────
 
 class JSONLLogger:
     def __init__(self, log_dir: Path) -> None:
@@ -57,11 +61,36 @@ class JSONLLogger:
         self._events_file = log_dir / "aura-events.jsonl"
         self._errors_file = log_dir / "aura-errors.jsonl"
         self._lock = asyncio.Lock()
+        self._sequence_number: int = 0
+        self._last_hash: str = GENESIS_HASH
+        self._init_chain_state()
+
+    def _init_chain_state(self) -> None:
+        """Initialize hash chain sequence and last hash from existing events file."""
+        if self._events_file.exists():
+            try:
+                with open(self._events_file, "r", encoding="utf-8") as f:
+                    lines = [l.strip() for l in f if l.strip()]
+                    if lines:
+                        last_record = json.loads(lines[-1])
+                        self._sequence_number = int(last_record.get("sequence_number", len(lines) - 1)) + 1
+                        self._last_hash = str(last_record.get("event_hash") or GENESIS_HASH)
+            except Exception:
+                pass
 
     async def log(self, event: AuditEvent) -> None:
-        line = event.to_jsonl() + "\n"
         async with self._lock:
             try:
+                # Assign sequence number and previous hash link
+                event.sequence_number = self._sequence_number
+                event.prev_hash = self._last_hash
+                data_dict = event.model_dump(mode="json", exclude_none=True)
+                event_hash = compute_event_hash(data_dict, self._last_hash, self._sequence_number)
+                event.event_hash = event_hash
+                self._last_hash = event_hash
+                self._sequence_number += 1
+
+                line = event.to_jsonl() + "\n"
                 with open(self._events_file, "a", encoding="utf-8") as f:
                     f.write(line)
                 if event.level in (EventLevel.ERROR, EventLevel.CRITICAL):
@@ -69,6 +98,10 @@ class JSONLLogger:
                         f.write(line)
             except Exception:
                 pass
+
+    def verify_integrity(self) -> Dict[str, Any]:
+        """Verify the cryptographic hash chain of the events log."""
+        return verify_audit_log_chain(self._events_file)
 
     async def read_events(
         self,

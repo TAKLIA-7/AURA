@@ -1,4 +1,4 @@
-"""AURA execution gateway — tool registry, interceptor, executor."""
+"""AURA execution gateway — tool registry, interceptor, executor, idempotency."""
 from __future__ import annotations
 import os
 import asyncio
@@ -9,6 +9,7 @@ from aura.models import (
     ActionRequest, ActionResult, ActionStatus,
     AuditEvent, EventLevel,
 )
+from aura.gateway.idempotency import IdempotencyManager
 
 
 # ── Tool Registry ─────────────────────────────────────────────────────────────
@@ -88,7 +89,7 @@ async def _handle_fs_write(args: Dict[str, Any], workspace: Path) -> Any:
 
 async def _handle_shell_execute(args: Dict[str, Any], workspace: Path) -> Any:
     cmd = args.get("command", "")
-    # Only allow a very restricted set of safe commands
+    # Safe prefix restriction
     ALLOWED_PREFIXES = ["echo ", "ls", "dir", "pwd", "whoami", "date", "python --version"]
     allowed = any(cmd.strip().startswith(p) for p in ALLOWED_PREFIXES)
     if not allowed:
@@ -125,10 +126,12 @@ async def _handle_mock_external(args: Dict[str, Any], workspace: Path) -> Any:
 async def _handle_sqlite_query(args: Dict[str, Any], workspace: Path) -> Any:
     from aura.database import run_sqlite_query
     query = args.get("query", "")
+    params = args.get("params") or args.get("parameters")
+    read_only = bool(args.get("read_only", False))
     if not query:
         raise ValueError("query argument is required")
     loop = asyncio.get_event_loop()
-    res = await loop.run_in_executor(None, lambda: run_sqlite_query(query))
+    res = await loop.run_in_executor(None, lambda: run_sqlite_query(query, params=params, read_only=read_only))
     return res
 
 
@@ -215,12 +218,16 @@ class ToolRegistry:
         return request
 
 
-
 # ── Executor ──────────────────────────────────────────────────────────────────
 
 class ToolExecutor:
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        idempotency_manager: Optional[IdempotencyManager] = None,
+    ) -> None:
         self.registry = registry
+        self.idempotency_manager = idempotency_manager
 
     async def execute(self, request: ActionRequest) -> ActionResult:
         tool_def = self.registry.get(request.tool)
@@ -230,11 +237,27 @@ class ToolExecutor:
                 success=False,
                 error=f"Tool '{request.tool}' not found in registry",
             )
+
+        key = None
+        if self.idempotency_manager:
+            key, cached, in_flight = await self.idempotency_manager.check_and_reserve(request)
+            if cached:
+                return cached
+            if in_flight:
+                awaited = await self.idempotency_manager.wait_for_in_flight(key, timeout=10.0)
+                if awaited:
+                    return awaited
+                return ActionResult(
+                    request_id=request.request_id,
+                    success=False,
+                    error="Concurrent duplicate tool execution blocked: action already in flight",
+                )
+
         start = time.monotonic()
         try:
             output = await tool_def.handler(request.arguments)
             duration_ms = (time.monotonic() - start) * 1000
-            return ActionResult(
+            res = ActionResult(
                 request_id=request.request_id,
                 success=True,
                 output=output,
@@ -242,9 +265,14 @@ class ToolExecutor:
             )
         except Exception as e:
             duration_ms = (time.monotonic() - start) * 1000
-            return ActionResult(
+            res = ActionResult(
                 request_id=request.request_id,
                 success=False,
                 error=str(e),
                 duration_ms=duration_ms,
             )
+
+        if self.idempotency_manager and key:
+            await self.idempotency_manager.record_completion(key, res)
+
+        return res

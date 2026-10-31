@@ -1,4 +1,5 @@
 """Unit tests for the AURA policy engine."""
+import asyncio
 import pytest
 from pathlib import Path
 from aura.models import ActionRequest, JEVAssessment, RiskLevel, DecisionResult
@@ -21,7 +22,6 @@ def test_allowlist_passes_allowed_tool(tmp_path):
     engine = make_engine(tmp_path)
     req = ActionRequest(tool="filesystem.list", target=".")
     decision = engine.pre_assessment_check(req)
-    # Should pass allowlist; no pre-assessment block
     assert decision is None or decision.decision != DecisionResult.BLOCK
 
 
@@ -83,52 +83,56 @@ def test_no_fast_allow_for_shell(tmp_path):
     assert engine.fast_allow(req) is False
 
 
-@pytest.mark.asyncio
-async def test_approval_manager_resolve_and_cancel():
-    from aura.policies import ApprovalManager
-    from aura.models import ActionRequest, PolicyDecision, DecisionResult
+def test_approval_manager_resolve_and_cancel():
+    async def _test():
+        from aura.policies import ApprovalManager
+        from aura.models import ActionRequest, PolicyDecision, DecisionResult
 
-    mgr = ApprovalManager()
-    req = ActionRequest(tool="sqlite.query", arguments={"query": "UPDATE employees SET salary = 100000;"})
-    decision = PolicyDecision(request_id=req.request_id, decision=DecisionResult.APPROVAL_REQUIRED, reason="Mutating query")
+        mgr = ApprovalManager()
+        req = ActionRequest(tool="sqlite.query", arguments={"query": "UPDATE employees SET salary = 100000;"})
+        decision = PolicyDecision(request_id=req.request_id, decision=DecisionResult.APPROVAL_REQUIRED, reason="Mutating query")
 
-    approval_id = await mgr.request_approval(req, decision)
-    assert approval_id.startswith("approval_")
-    pending = await mgr.get_pending()
-    assert len(pending) == 1
+        approval_id = await mgr.request_approval(req, decision)
+        assert approval_id.startswith("approval_")
+        pending = await mgr.get_pending()
+        assert len(pending) == 1
 
-    # Test resolve approve
-    await mgr.resolve(approval_id, approved=True)
-    res = await mgr.wait_for_resolution(approval_id)
-    assert res == "approved"
+        # Test resolve approve
+        await mgr.resolve(approval_id, approved=True)
+        res = await mgr.wait_for_resolution(approval_id)
+        assert res == "approved"
 
-    # Test resolve all pending
-    approval_id2 = await mgr.request_approval(req, decision)
-    await mgr.resolve_all_pending("cancelled")
-    res2 = await mgr.wait_for_resolution(approval_id2)
-    assert res2 == "cancelled"
+        # Test resolve all pending
+        approval_id2 = await mgr.request_approval(req, decision)
+        await mgr.resolve_all_pending("cancelled")
+        res2 = await mgr.wait_for_resolution(approval_id2)
+        assert res2 == "cancelled"
+
+    asyncio.run(_test())
 
 
-@pytest.mark.asyncio
-async def test_approval_modal_screen_actions():
-    from aura.ui.screens.approval_modal import ApprovalModalScreen
-    from aura.policies import ApprovalManager
+def test_approval_modal_screen_actions():
+    pytest.importorskip("textual")
+    async def _test():
+        from aura.ui.screens.approval_modal import ApprovalModalScreen
+        from aura.policies import ApprovalManager
+        from aura.models import ActionRequest, PolicyDecision, DecisionResult
 
-    mgr = ApprovalManager()
-    from aura.models import ActionRequest, PolicyDecision, DecisionResult
-    req = ActionRequest(tool="sqlite.query", arguments={"query": "DELETE FROM employees WHERE id = 1;"})
-    dec = PolicyDecision(request_id=req.request_id, decision=DecisionResult.APPROVAL_REQUIRED, reason="Delete query")
-    approval_id = await mgr.request_approval(req, dec)
+        mgr = ApprovalManager()
+        req = ActionRequest(tool="sqlite.query", arguments={"query": "DELETE FROM employees WHERE id = 1;"})
+        dec = PolicyDecision(request_id=req.request_id, decision=DecisionResult.APPROVAL_REQUIRED, reason="Delete query")
+        approval_id = await mgr.request_approval(req, dec)
 
-    modal = ApprovalModalScreen(
-        approval_id=approval_id,
-        tool="sqlite.query",
-        args={"query": "DELETE FROM employees WHERE id = 1;"},
-        reason="Mutating database statement",
-        approval_manager=mgr,
-    )
-    # Simulate action approve
-    await modal.action_approve()
-    assert modal._resolved is True
-    res = await mgr.wait_for_resolution(approval_id)
-    assert res == "approved"
+        modal = ApprovalModalScreen(
+            approval_id=approval_id,
+            tool="sqlite.query",
+            args={"query": "DELETE FROM employees WHERE id = 1;"},
+            reason="Mutating database statement",
+            approval_manager=mgr,
+        )
+        await modal.action_approve()
+        assert modal._resolved is True
+        res = await mgr.wait_for_resolution(approval_id)
+        assert res == "approved"
+
+    asyncio.run(_test())

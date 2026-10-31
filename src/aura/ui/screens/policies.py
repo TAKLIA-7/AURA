@@ -97,6 +97,25 @@ class PoliciesView(Container):
         ]
         for step in steps:
             t2.append(f"  {step}\n", style="#888899")
+
+        t2.append("\n  Multi-Agent RBAC Matrix:\n", style="bold cyan")
+        rbac_specs = [
+            ("ADMIN", "Full tools, override, delegation"),
+            ("SUPERVISOR", "All standard tools, monotonic delegation"),
+            ("SQL_AGENT", "database.query (parameterized & read-only)"),
+            ("FS_AGENT", "filesystem.read/write (restricted to ./data/)"),
+            ("DIAGNOSTIC", "diagnostic.ping (health checks only)"),
+            ("EXTERNAL", "No shell, no internal SQL access"),
+            ("GUEST", "Zero mutate, read diagnostics only"),
+        ]
+        for role, desc in rbac_specs:
+            t2.append(f"    • {role:12s} ", style="bold #00e5ff")
+            t2.append(f"{desc}\n", style="dim #ccddee")
+
+        t2.append("\n  Monotone Policy Lattice:\n", style="bold cyan")
+        t2.append("    ALLOW  ≺  APPROVAL_REQUIRED  ≺  BLOCK\n", style="bold #10b981")
+        t2.append("    • Hysteresis floor prevents de-escalation\n", style="dim")
+        t2.append("    • Risk ratchet persists throughout session\n", style="dim")
         self.query_one("#risk-rules-content", Static).update(t2)
 
     def _setup_approvals_table(self) -> None:

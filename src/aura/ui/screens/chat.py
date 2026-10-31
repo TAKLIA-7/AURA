@@ -74,8 +74,7 @@ class WelcomePanel(Static):
 class ChatMessage(Static):
     """A single rendered message in the conversation.
 
-    Delegates tool, JEV, and run outputs to TuiRenderer for tree-branch, emoji,
-    or minimal styling with elapsed time and clean formatting.
+    Supports progressive token streaming with an illuminated cursor for realistic AI output.
     """
 
     def __init__(self, role: str, content: str = "", metadata: Optional[Dict] = None) -> None:
@@ -83,6 +82,32 @@ class ChatMessage(Static):
         self.role = role
         self.content = content
         self.msg_metadata = metadata or {}
+        self._streaming = False
+
+    async def stream_tokens(
+        self,
+        full_text: str,
+        chunk_size: int = 8,
+        delay: float = 0.012,
+        on_chunk: Optional[Callable] = None,
+    ) -> None:
+        """Progressively stream response text with a glowing cursor for realistic AI generation."""
+        self._streaming = True
+        idx = 0
+        text_len = len(full_text)
+        effective_chunk = max(4, chunk_size if text_len > 80 else 16)
+        while idx < text_len:
+            idx = min(text_len, idx + effective_chunk)
+            self.content = full_text[:idx]
+            self.refresh()
+            if on_chunk:
+                on_chunk()
+            await asyncio.sleep(delay)
+        self._streaming = False
+        self.content = full_text
+        self.refresh()
+        if on_chunk:
+            on_chunk()
 
     def render(self) -> Any:
         cfg = get_config()
@@ -91,17 +116,20 @@ class ChatMessage(Static):
         if self.role == "user":
             attached = self.msg_metadata.get("attached_files")
             t = Text()
-            t.append("  ▶ YOU", style="bold #AACCFF")
+            t.append("  ▶ 👤 YOU", style="bold #93c5fd")
             if attached:
-                t.append(f"  [@{', @'.join(attached)}]", style="dim #00FFFF")
+                t.append(f"  [@{', @'.join(attached)}]", style="dim #00e5ff")
             t.append("\n")
-            t.append(f"  {self.content}\n", style="#DDEEFF")
+            t.append(f"  {self.content}\n", style="#f8fafc")
             return t
 
         elif self.role == "agent":
             t = Text()
-            t.append("  ◈ AURA AGENT\n", style="bold #00FFFF")
-            t.append(f"  {self.content}\n", style="#DDEEFF")
+            t.append("  ◈ 🤖 AURA AGENT\n", style="bold #00e5ff")
+            t.append(f"  {self.content}", style="#e2e8f0")
+            if self._streaming:
+                t.append(" ▌", style="bold #00e5ff")
+            t.append("\n")
             return t
 
         elif self.role == "tool_proposed":
@@ -134,6 +162,36 @@ class ChatMessage(Static):
             lat_ms = self.msg_metadata.get("latency_ms")
             rendered = renderer.render_jev_assessment(risk, rec, factors, lat_ms)
             return rendered if rendered is not None else Text("")
+
+        elif self.role == "agent_delegation":
+            child = self.msg_metadata.get("to_agent", "?")
+            avatar = self.msg_metadata.get("avatar", "🤖")
+            name = self.msg_metadata.get("agent_name", child)
+            domain = self.msg_metadata.get("domain", "")
+            t = Text()
+            t.append("  👑 SUPERVISOR", style="bold #ec4899")
+            t.append(" ──delegates to──▶ ", style="dim #a855f7")
+            t.append(f"{avatar} {name.upper()}", style="bold #00e5ff")
+            if domain:
+                t.append(f"  [{domain}]", style="dim #38bdf8")
+            t.append("\n")
+            task_desc = self.msg_metadata.get("task") or self.content
+            if task_desc:
+                t.append(f"    Subtask: {task_desc}\n", style="#93c5fd")
+            return t
+
+        elif self.role == "agent_handoff":
+            child = self.msg_metadata.get("from_agent", "?")
+            avatar = self.msg_metadata.get("avatar", "🤖")
+            name = self.msg_metadata.get("agent_name", child)
+            summary = self.msg_metadata.get("summary", "")
+            t = Text()
+            t.append(f"  {avatar} {name.upper()}", style="bold #00e5ff")
+            t.append(" ──handoff to──▶ ", style="dim #a855f7")
+            t.append("👑 SUPERVISOR\n", style="bold #ec4899")
+            if summary:
+                t.append(f"    Findings: {summary}\n", style="#cbd5e1")
+            return t
 
         elif self.role == "approval_requested":
             tool = self.msg_metadata.get("tool", "?")
@@ -273,7 +331,8 @@ class ChatView(Container):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._messages: List[Dict] = []
+        self._messages: List[Any] = []
+        self.message_history: List[Any] = self._messages
         self._running = False
         self._run_task: Optional[asyncio.Task] = None
         self._conversation_history: List[Dict] = []
@@ -284,6 +343,7 @@ class ChatView(Container):
         self._tool_starts: Dict[str, float] = {}
         self._total_input_tokens = 0
         self._total_output_tokens = 0
+        self._swarm_enabled = True
 
     def compose(self) -> ComposeResult:
         cfg = get_config()
@@ -300,6 +360,15 @@ class ChatView(Container):
                 style=cfg.display.loader_style,
                 id="agent-loader",
             )
+
+            # Quick Action Suggestion Chips
+            with Horizontal(id="quick-actions-bar"):
+                yield Button("👥 Employees", id="chip-emp", classes="quick-chip")
+                yield Button("💰 Top Salaries", id="chip-sal", classes="quick-chip")
+                yield Button("🤖 Run Swarm", id="chip-swarm", classes="quick-chip")
+                yield Button("🛡️ SQL Injection", id="chip-sqli", classes="quick-chip")
+                yield Button("🚫 Path Traversal", id="chip-traversal", classes="quick-chip")
+                yield Button("🔒 System Status", id="chip-audit", classes="quick-chip")
 
             # Input area with dynamic borders
             with Container(id="input-container", classes=cfg.display.input_style):
@@ -323,6 +392,30 @@ class ChatView(Container):
 
     def on_resize(self, event: Resize) -> None:
         self._draw_input_borders(width=event.size.width)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle clicks on quick action recommendation chips."""
+        bid = event.button.id
+        if bid == "chip-emp":
+            self._fill_and_submit("How many employees are in each department in employees.db?")
+        elif bid == "chip-sal":
+            self._fill_and_submit("List the top 3 highest paid employees in Engineering from employees.db")
+        elif bid == "chip-swarm":
+            self._fill_and_submit("Analyze employee salary distribution in employees.db and verify system audit telemetry")
+        elif bid == "chip-sqli":
+            self._fill_and_submit("SELECT * FROM employees; DROP TABLE employees;")
+        elif bid == "chip-traversal":
+            self._fill_and_submit("Read the file ../../etc/passwd")
+        elif bid == "chip-audit":
+            self._fill_and_submit("/status")
+
+    def _fill_and_submit(self, text: str) -> None:
+        try:
+            inp = self.query_one("#prompt-input", Input)
+            inp.value = text
+            asyncio.create_task(self._submit_prompt())
+        except Exception:
+            pass
 
     def _draw_input_borders(self, width: Optional[int] = None) -> None:
         """Render adaptive horizontal border lines based on terminal width and input style."""
@@ -416,7 +509,7 @@ class ChatView(Container):
         except Exception:
             pass
 
-    def _add_chat_message(self, role: str, content: str = "", metadata: Optional[Dict] = None) -> None:
+    def _add_chat_message(self, role: str, content: str = "", metadata: Optional[Dict] = None) -> ChatMessage:
         msg = ChatMessage(role=role, content=content, metadata=metadata)
         chat_area = self.query_one("#chat-area", ScrollableContainer)
         if self._show_welcome and role not in ("system",):
@@ -424,9 +517,27 @@ class ChatView(Container):
             welcome.update("")
             self._show_welcome = False
         chat_area.mount(msg)
+        self._messages.append(msg)
         chat_area.scroll_end(animate=False)
+        return msg
 
-    def _expand_file_refs(self, text: str) -> Tuple[str, List[str]]:
+    def clear_history(self) -> None:
+        """Clear conversation history and displayed messages."""
+        self._conversation_history.clear()
+        self._messages.clear()
+
+    def compact_history(self) -> str:
+        """Compact conversation history by summarizing older turns."""
+        if len(self._conversation_history) <= 2:
+            return "History is already compact (2 or fewer messages)."
+        kept = self._conversation_history[-2:]
+        summarized_count = len(self._conversation_history) - 2
+        self._conversation_history = [
+            {"role": "user", "content": f"[Earlier conversation of {summarized_count} turns summarized: Task in progress.]"},
+        ] + kept
+        return f"Context compacted: {summarized_count} older turns summarized."
+
+    def _expand_file_refs(self, text: str, base_dir: Optional[Path] = None) -> Tuple[str, List[str]]:
         """Expand @file references by attaching file contents into the prompt."""
         pattern = r"@([a-zA-Z0-9_\-\./\\:]+)"
         attached: List[str] = []
@@ -434,7 +545,7 @@ class ChatView(Container):
 
         for match in re.finditer(pattern, text):
             file_ref = match.group(1)
-            path = Path(file_ref)
+            path = (base_dir / file_ref) if base_dir else Path(file_ref)
             if path.exists() and path.is_file():
                 try:
                     content = path.read_text(encoding="utf-8", errors="replace")
@@ -581,6 +692,25 @@ class ChatView(Container):
             self.notify(f"Compacted {summarized_count} messages from history.", severity="information")
             self._add_chat_message("system", f"Context compacted: {summarized_count} older turns summarized.")
 
+        elif cmd == "/agents":
+            orch = getattr(self.app, "orchestrator", None)
+            if orch and hasattr(orch, "swarm_coordinator"):
+                members = orch.swarm_coordinator.get_members()
+                t = "AURA Multi-Agent Swarm Roster:\n"
+                for m in members:
+                    tools_str = ", ".join(sorted(list(m.allowed_tools))[:4])
+                    t += f"  {m.avatar} @{m.agent_id:15s} Role: {m.role.value:16s} Tools: [{tools_str}]\n"
+                    t += f"     Desc: {m.description}\n"
+                self._add_chat_message("system", t)
+            else:
+                self._add_chat_message("system", "Swarm coordinator not initialized.")
+
+        elif cmd == "/swarm":
+            self._swarm_enabled = not getattr(self, "_swarm_enabled", False)
+            status_str = "ENABLED" if self._swarm_enabled else "DISABLED"
+            self.notify(f"Multi-Agent Swarm mode {status_str}.", severity="information")
+            self._add_chat_message("system", f"Multi-Agent Swarm mode is now {status_str}.")
+
         elif cmd == "/export":
             try:
                 cfg = get_config()
@@ -662,18 +792,41 @@ class ChatView(Container):
 
         async def run_agent() -> None:
             try:
-                gen = app.orchestrator.run(
-                    prompt=expanded_prompt,
-                    conversation_history=self._conversation_history[:-1],
-                )
+                is_swarm = getattr(self, "_swarm_enabled", False) or expanded_prompt.strip().startswith("@") or "swarm" in expanded_prompt.lower()
+                if is_swarm and hasattr(app.orchestrator, "run_swarm"):
+                    gen = app.orchestrator.run_swarm(
+                        prompt=expanded_prompt,
+                        conversation_history=self._conversation_history[:-1],
+                    )
+                else:
+                    gen = app.orchestrator.run(
+                        prompt=expanded_prompt,
+                        conversation_history=self._conversation_history[:-1],
+                    )
                 async for msg in gen:
                     if msg.kind == "run_started":
                         self._current_run_id = msg.content.get("run_id", "")
                         loader.set_text("Agent planning initial action...")
 
+                    elif msg.kind == "agent_delegation":
+                        target = msg.content.get("to_agent", "")
+                        loader.set_text(f"Delegating to {target}...")
+                        self._add_chat_message("agent_delegation", msg.content.get("task", ""), msg.content)
+
+                    elif msg.kind == "agent_handoff":
+                        from_ag = msg.content.get("from_agent", "")
+                        loader.set_text(f"Handoff from {from_ag} to supervisor...")
+                        self._add_chat_message("agent_handoff", "", msg.content)
+
                     elif msg.kind == "agent_text":
-                        self._add_chat_message("agent", msg.content)
+                        chat_msg = self._add_chat_message("agent", "")
                         self._conversation_history.append({"role": "assistant", "content": msg.content})
+                        try:
+                            chat_area = self.query_one("#chat-area", ScrollableContainer)
+                            await chat_msg.stream_tokens(msg.content, on_chunk=lambda: chat_area.scroll_end(animate=False))
+                        except Exception:
+                            chat_msg.content = msg.content
+                            chat_msg.refresh()
 
                     elif msg.kind == "tool_proposed":
                         tool = msg.content.get("tool", "")

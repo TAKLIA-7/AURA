@@ -1,4 +1,4 @@
-"""AURA policy engine — rules, enforcement, approvals."""
+"""AURA policy engine — rules, enforcement, approvals, RBAC, monotone policy."""
 from __future__ import annotations
 import asyncio
 from pathlib import Path
@@ -6,6 +6,13 @@ from typing import Any, Dict, List, Optional, Set
 from aura.models import (
     ActionRequest, JEVAssessment, PolicyDecision,
     DecisionResult, RiskLevel,
+)
+from aura.policies.rules import PolicyRule
+from aura.policies.rbac import (
+    AgentRBACManager, AgentRBACRule, DEFAULT_ROLE_DEFINITIONS, RoleDefinition,
+)
+from aura.policies.monotone import (
+    MonotonePolicyEngine, MonotonePolicyRule,
 )
 
 
@@ -55,14 +62,7 @@ RISK_TO_DECISION: Dict[str, DecisionResult] = {
 }
 
 
-class PolicyRule:
-    def __init__(self, rule_id: str, description: str, enabled: bool = True) -> None:
-        self.rule_id = rule_id
-        self.description = description
-        self.enabled = enabled
 
-    def evaluate(self, request: ActionRequest) -> Optional[PolicyDecision]:
-        return None
 
 
 class ToolAllowlistRule(PolicyRule):
@@ -149,12 +149,21 @@ class AlwaysApprovalRule(PolicyRule):
 # ── Policy Engine ─────────────────────────────────────────────────────────────
 
 class PolicyEngine:
-    def __init__(self, workspace_root: Path) -> None:
+    def __init__(
+        self,
+        workspace_root: Path,
+        rbac_manager: Optional[AgentRBACManager] = None,
+        monotone_engine: Optional[MonotonePolicyEngine] = None,
+    ) -> None:
         self.workspace_root = workspace_root
+        self.rbac_manager = rbac_manager or AgentRBACManager()
+        self.monotone_engine = monotone_engine or MonotonePolicyEngine()
         self._rules: List[PolicyRule] = [
+            AgentRBACRule(self.rbac_manager),
             ToolAllowlistRule(),
             UnconditionalDenyRule(),
             PathTraversalRule(workspace_root),
+            MonotonePolicyRule(self.monotone_engine),
             AlwaysApprovalRule(),
         ]
 
@@ -166,6 +175,9 @@ class PolicyEngine:
             decision = rule.evaluate(request)
             if decision and decision.decision in (DecisionResult.BLOCK,):
                 decision.enforced = True
+                self.monotone_engine.register_decision(request, DecisionResult.BLOCK)
+                return decision
+            elif decision and decision.decision == DecisionResult.APPROVAL_REQUIRED:
                 return decision
         return None
 
@@ -184,7 +196,7 @@ class PolicyEngine:
             if isinstance(rule, AlwaysApprovalRule) and rule.enabled:
                 d = rule.evaluate(request)
                 if d:
-                    return PolicyDecision(
+                    decision = PolicyDecision(
                         request_id=request.request_id,
                         assessment_id=assessment.assessment_id,
                         decision=DecisionResult.APPROVAL_REQUIRED,
@@ -193,6 +205,8 @@ class PolicyEngine:
                         requires_human_review=True,
                         enforced=False,
                     )
+                    self.monotone_engine.register_decision(request, DecisionResult.APPROVAL_REQUIRED)
+                    return decision
 
         # Apply risk-based decision
         risk_str = assessment.risk_level.value if hasattr(assessment.risk_level, "value") else str(assessment.risk_level)
@@ -200,7 +214,7 @@ class PolicyEngine:
 
         # JEV recommends block -> AURA blocks
         if assessment.recommended_action == DecisionResult.BLOCK:
-            return PolicyDecision(
+            dec = PolicyDecision(
                 request_id=request.request_id,
                 assessment_id=assessment.assessment_id,
                 decision=DecisionResult.BLOCK,
@@ -208,10 +222,12 @@ class PolicyEngine:
                 policy_rule_id="POLICY-JEV-001",
                 enforced=True,
             )
+            self.monotone_engine.register_decision(request, DecisionResult.BLOCK)
+            return dec
 
         # JEV recommends approval -> AURA requires approval
         if assessment.recommended_action == DecisionResult.APPROVAL_REQUIRED or assessment.requires_human_review:
-            return PolicyDecision(
+            dec = PolicyDecision(
                 request_id=request.request_id,
                 assessment_id=assessment.assessment_id,
                 decision=DecisionResult.APPROVAL_REQUIRED,
@@ -220,8 +236,10 @@ class PolicyEngine:
                 requires_human_review=True,
                 enforced=False,
             )
+            self.monotone_engine.register_decision(request, DecisionResult.APPROVAL_REQUIRED)
+            return dec
 
-        return PolicyDecision(
+        dec = PolicyDecision(
             request_id=request.request_id,
             assessment_id=assessment.assessment_id,
             decision=base_decision,
@@ -229,6 +247,8 @@ class PolicyEngine:
             policy_rule_id="POLICY-RISK-001",
             enforced=base_decision == DecisionResult.ALLOW,
         )
+        self.monotone_engine.register_decision(request, base_decision)
+        return dec
 
     def get_rules_summary(self) -> List[Dict[str, Any]]:
         return [

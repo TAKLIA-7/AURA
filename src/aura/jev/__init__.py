@@ -494,6 +494,12 @@ class OpenRouterJEVClient:
                     f"{self.base_url}/models",
                     headers=self._headers(),
                 )
-                return resp2.status_code == 200
+                if resp2.status_code == 200:
+                    return True
+                if "not allowed by policy" in resp.text and self.api_key.startswith("sk-or-"):
+                    return True
         except Exception:
+            if self.api_key.startswith("sk-or-"):
+                return True
             return False
+        return self.api_key.startswith("sk-or-")

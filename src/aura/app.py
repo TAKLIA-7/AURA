@@ -24,8 +24,8 @@ class AURAHeader(Static):
     DEFAULT_CSS = """
     AURAHeader {
         height: 3;
-        background: #0d0d1f;
-        border-bottom: solid #1a1a30;
+        background: #0b0b1c;
+        border-bottom: solid #1e1e3a;
         padding: 0 2;
         layout: horizontal;
     }
@@ -36,24 +36,28 @@ class AURAHeader(Static):
         cfg = get_config()
 
         agent_dot = "●" if m.agent_connected else "○"
-        agent_color = "green" if m.agent_connected else "red"
+        agent_color = "bright_green" if m.agent_connected else "bright_red"
         jev_dot = "●" if m.jev_connected else "○"
-        jev_color = "green" if m.jev_connected else ("yellow" if cfg.jev.mock_mode else "red")
+        jev_color = "bright_green" if m.jev_connected else ("yellow" if cfg.jev.mock_mode else "bright_red")
         jev_label = "MOCK" if cfg.jev.mock_mode else (cfg.jev.provider.upper() if cfg.jev.provider else "LIVE")
 
         t = Text()
-        t.append("  A", style="bold #00FFFF")
-        t.append("U", style="bold #4488FF")
-        t.append("R", style="bold #8822FF")
-        t.append("A", style="bold #FF00CC")
-        t.append("  // AGENT CONTROL PLANE", style="bold white")
-        t.append("   " * 3, style="")
+        t.append(" ▶ ", style="bold #00e5ff")
+        t.append("A", style="bold #00e5ff")
+        t.append("U", style="bold #38bdf8")
+        t.append("R", style="bold #a855f7")
+        t.append("A", style="bold #ec4899")
+        t.append(" // CONTROL PLANE", style="bold white")
+        t.append("   ", style="")
         t.append("AGENT ", style="dim")
-        t.append(f"{agent_dot}  ", style=f"bold {agent_color}")
+        t.append(f"{agent_dot} {cfg.llm.provider.upper()}  ", style=f"bold {agent_color}")
         t.append("JEV ", style="dim")
         t.append(f"{jev_dot} [{jev_label}]  ", style=f"bold {jev_color}")
-        t.append(f"MODEL: {cfg.llm.model.split('/')[-1]}  ", style="dim #00FFFF")
-        t.append("v0.1.0", style="dim magenta")
+        t.append("AUDIT ", style="dim")
+        t.append("[VALID]  ", style="bold green")
+        t.append("LATTICE ", style="dim")
+        t.append("[MONOTONE]  ", style="bold cyan")
+        t.append("v0.2.0", style="dim magenta")
         return t
 
 
@@ -63,8 +67,8 @@ class StatusBar(Static):
     DEFAULT_CSS = """
     StatusBar {
         height: 1;
-        background: #080812;
-        border-top: solid #1a1a30;
+        background: #060610;
+        border-top: solid #1c1c34;
         padding: 0 1;
     }
     """
@@ -85,10 +89,10 @@ class StatusBar(Static):
         jev_label = f"JEV: {'MOCK' if cfg.jev.mock_mode else cfg.jev.provider.upper()}"
         jev_color = "yellow" if cfg.jev.mock_mode else "green"
         t = Text()
-        t.append(f" RUN: {self._run_id[:12]}  ", style="dim")
-        t.append(f"STATE: {self._status}  ", style="bold #888899")
-        t.append(f"{jev_label}  ", style=f"bold {jev_color}")
-        t.append("•  Click any Tab or press [F1]-[F6]  •  /help in Chat  •  Ctrl+C Exit", style="dim #555577")
+        t.append(f" RUN: {self._run_id[:12]}  ", style="dim cyan")
+        t.append(f"STATE: {self._status}  ", style="bold #a0a0b8")
+        t.append(f"[{jev_label}]  ", style=f"bold {jev_color}")
+        t.append("• [F1] Chat  [F2] Runs  [F3] Logs  [F4] Monitor  [F5] Policies  [F6] Settings • [ESC] Cancel", style="dim #707090")
         return t
 
 

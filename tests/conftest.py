@@ -1,5 +1,6 @@
 """Shared test fixtures."""
 import asyncio
+import inspect
 import os
 import pytest
 from pathlib import Path
@@ -8,6 +9,14 @@ from pathlib import Path
 os.environ["AURA_JEV_MOCK_MODE"] = "true"
 os.environ["AURA_DATA_DIR"] = "./data/test"
 os.environ["GOOGLE_API_KEY"] = "test-key-placeholder"
+
+
+def pytest_pyfunc_call(pyfuncitem):
+    """Enable native asyncio execution for async test functions without external plugin."""
+    if inspect.iscoroutinefunction(pyfuncitem.obj):
+        funcargs = {arg: pyfuncitem.funcargs[arg] for arg in pyfuncitem._fixtureinfo.argnames}
+        asyncio.run(pyfuncitem.obj(**funcargs))
+        return True
 
 
 @pytest.fixture
