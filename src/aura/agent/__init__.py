@@ -17,6 +17,8 @@ from aura.observability import (
 from aura.jev import JEVClient, JEVContextBuilder, MockJEVClient, OpenRouterJEVClient
 from aura.policies import PolicyEngine, ApprovalManager
 from aura.gateway import ToolRegistry, ToolExecutor
+from aura.governance import GovernanceManager
+from aura.rag import PineconeRAGService
 
 
 class AgentMessage:
@@ -491,8 +493,10 @@ class AURAOrchestrator:
             self.jev_mode = "mock"
 
         self.context_builder = JEVContextBuilder()
-        self.policy_engine = PolicyEngine(config.runtime.workspace_root)
+        self.governance_manager = GovernanceManager(config.runtime.data_dir / "governance.db")
+        self.policy_engine = PolicyEngine(config.runtime.workspace_root, governance_manager=self.governance_manager)
         self.approval_manager = ApprovalManager()
+        self.rag_service = PineconeRAGService()
 
         # LLM Provider selection
         if config.llm.provider == "openrouter" and config.llm.api_key:
@@ -702,10 +706,12 @@ class AURAOrchestrator:
                         })
                         tool_results_for_next_turn.append({"tool_name": raw_name, "result": f"[BLOCKED: {pre_decision.reason}]"})
                         continue
-
+                    elif pre_decision and pre_decision.decision == DecisionResult.APPROVAL_REQUIRED:
+                        final_decision = pre_decision
+                        assessment = None
                     # Fast allow
-                    assessment = None
-                    if self.policy_engine.fast_allow(request):
+                    elif self.policy_engine.fast_allow(request):
+                        assessment = None
                         final_decision = PolicyDecision(
                             request_id=request.request_id,
                             decision=DecisionResult.ALLOW,
@@ -714,9 +720,20 @@ class AURAOrchestrator:
                             enforced=True,
                         )
                     else:
+                        assessment = None
                         # JEV Assessment
-                        self._status(f"JEV assessing: {tool_name}...")
-                        jev_payload = self.context_builder.build(request=request, user_intent=prompt, run=run)
+                        # Retrieve relevant organizational policies from Pinecone RAG
+                        rag_policy_ctx = self.rag_service.get_policy_context_for_action(
+                            user_intent=prompt,
+                            tool_name=tool_name,
+                            org_id=getattr(request, "org_id", "default-org"),
+                        )
+                        jev_payload = self.context_builder.build(
+                            request=request,
+                            user_intent=prompt,
+                            run=run,
+                            policy_context=rag_policy_ctx or None,
+                        )
                         await self._emit(AuditEvent(
                             level=EventLevel.INFO, event_type="aura.jev.assessment.started",
                             session_id=self.session_id, run_id=run.run_id,

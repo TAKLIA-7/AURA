@@ -149,8 +149,9 @@ class AlwaysApprovalRule(PolicyRule):
 # ── Policy Engine ─────────────────────────────────────────────────────────────
 
 class PolicyEngine:
-    def __init__(self, workspace_root: Path) -> None:
+    def __init__(self, workspace_root: Path, governance_manager: Optional[Any] = None) -> None:
         self.workspace_root = workspace_root
+        self.governance_manager = governance_manager
         self._rules: List[PolicyRule] = [
             ToolAllowlistRule(),
             UnconditionalDenyRule(),
@@ -167,6 +168,29 @@ class PolicyEngine:
             if decision and decision.decision in (DecisionResult.BLOCK,):
                 decision.enforced = True
                 return decision
+
+        # Deterministic Organizational Policy Evaluation (fast-path deterministic check)
+        if self.governance_manager:
+            org_res = self.governance_manager.evaluate_request(request)
+            if org_res:
+                dec_res, reason, rule_id = org_res
+                if dec_res == DecisionResult.BLOCK:
+                    return PolicyDecision(
+                        request_id=request.request_id,
+                        decision=DecisionResult.BLOCK,
+                        reason=f"[Org Policy] {reason}",
+                        policy_rule_id=rule_id,
+                        enforced=True,
+                    )
+                elif dec_res == DecisionResult.APPROVAL_REQUIRED:
+                    return PolicyDecision(
+                        request_id=request.request_id,
+                        decision=DecisionResult.APPROVAL_REQUIRED,
+                        reason=f"[Org Policy] {reason}",
+                        policy_rule_id=rule_id,
+                        requires_human_review=True,
+                        enforced=False,
+                    )
         return None
 
     def fast_allow(self, request: ActionRequest) -> bool:

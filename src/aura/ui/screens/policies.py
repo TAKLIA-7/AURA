@@ -70,10 +70,24 @@ class PoliciesView(Container):
             t.append(f"    ⚡ {tool}\n", style="cyan")
         self.query_one("#tool-rules-content", Static).update(t)
 
-        # Risk rules
+        # Risk rules and Organizational Governance
         t2 = Text()
-        t2.append("RISK → DECISION MAPPING\n", style="bold cyan")
-        t2.append("\n")
+        t2.append("ORGANIZATIONAL GOVERNANCE & ROLES\n", style="bold cyan")
+        try:
+            from aura.governance import GovernanceManager
+            gm = GovernanceManager()
+            org = gm.get_organization("default-org")
+            org_name = org["name"] if org else "Default Org"
+            t2.append(f"  Organization: {org_name}\n", style="bold white")
+            active_pols = gm.get_active_policies("default-org")
+            for p in active_pols:
+                t2.append(f"  ◈ Policy: {p.name} (v{p.version})\n", style="bold green")
+                t2.append(f"    Protected: {', '.join(p.protected_resources)}\n", style="dim")
+                t2.append(f"    Required Approvals: {', '.join(p.required_approval_roles)}\n", style="yellow")
+        except Exception as e:
+            t2.append(f"  Org policies: {e}\n", style="dim")
+
+        t2.append("\nRISK → DECISION MAPPING\n", style="bold cyan")
         risk_map = [
             ("none",     "ALLOW",   "green"),
             ("low",      "ALLOW",   "green"),
@@ -87,13 +101,13 @@ class PoliciesView(Container):
         t2.append("\n")
         t2.append("  Policy evaluation order:\n", style="dim cyan")
         steps = [
-            "1. Schema validation",
-            "2. Tool allowlist check",
-            "3. Unconditional deny",
-            "4. Path traversal check",
-            "5. JEV risk assessment",
-            "6. Risk-based policy",
-            "7. Human approval (if required)",
+            "1. Schema validation & Tool allowlist",
+            "2. Unconditional deny & Path traversal barrier",
+            "3. Multi-Tenant Organizational Policies (SQLite)",
+            "4. Pinecone RAG policy context retrieval",
+            "5. JEV risk assessment (OpenRouter / Gemini)",
+            "6. Risk threshold evaluation",
+            "7. Human approval gate (if required)",
         ]
         for step in steps:
             t2.append(f"  {step}\n", style="#888899")

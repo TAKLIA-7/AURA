@@ -73,6 +73,9 @@ class ActionRequest(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict)
     data_classification: str = "internal"
     reversible: bool = True
+    org_id: str = "default-org"
+    role: str = "analyst"
+    context: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ActionResult(BaseModel):
