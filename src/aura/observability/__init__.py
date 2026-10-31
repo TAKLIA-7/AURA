@@ -1,5 +1,6 @@
 """AURA observability — event bus, JSONL logging, metrics, run repository."""
 from __future__ import annotations
+import os
 import asyncio
 import json
 import time
@@ -243,9 +244,72 @@ def get_metrics() -> MetricsCollector:
 # ── Run Repository ────────────────────────────────────────────────────────────
 
 class RunRepository:
-    def __init__(self) -> None:
+    def __init__(self, log_dir: Optional[Path] = None) -> None:
         self._runs: Dict[str, RunRecord] = {}
         self._lock = asyncio.Lock()
+        self.log_dir = log_dir or Path(os.getenv("AURA_DATA_DIR", "./data")) / "logs"
+        self._hydrated = False
+
+    def _hydrate_from_disk(self) -> None:
+        if self._hydrated:
+            return
+        events_file = self.log_dir / "aura-events.jsonl"
+        if not events_file.exists():
+            self._hydrated = True
+            return
+        try:
+            with open(events_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except Exception:
+                        continue
+                    rid = ev.get("run_id")
+                    if not rid:
+                        continue
+                    et = ev.get("event_type", "")
+                    ts_str = ev.get("timestamp")
+                    ts = datetime.fromisoformat(ts_str) if ts_str else datetime.now(timezone.utc)
+                    meta = ev.get("metadata") or {}
+
+                    if rid not in self._runs:
+                        prompt_text = meta.get("prompt") or meta.get("user_prompt") or "Task execution"
+                        self._runs[rid] = RunRecord(
+                            run_id=rid,
+                            session_id=ev.get("session_id", ""),
+                            user_prompt=prompt_text,
+                            started_at=ts,
+                            status=RunStatus.COMPLETED if "completed" in et else RunStatus.RUNNING,
+                            model=ev.get("actor", {}).get("model", "default"),
+                        )
+
+                    run = self._runs[rid]
+                    if et == "aura.run.completed":
+                        run.status = RunStatus.COMPLETED
+                        if ev.get("execution") and ev["execution"].get("duration_ms"):
+                            run.duration_ms = float(ev["execution"]["duration_ms"])
+                    elif et in ("aura.run.failed", "aura.multiagent.failed"):
+                        run.status = RunStatus.FAILED
+                    elif et == "aura.action.executed":
+                        run.allowed_actions += 1
+                        run.total_tool_calls += 1
+                    elif et == "aura.action.blocked":
+                        run.blocked_actions += 1
+                        run.total_tool_calls += 1
+                    elif et == "aura.jev.assessment.completed":
+                        run.jev_assessments += 1
+
+                    run.timeline.append({
+                        "timestamp": ev.get("timestamp", ""),
+                        "event_type": et,
+                        "detail": meta or ev.get("action") or {},
+                    })
+        except Exception:
+            pass
+        self._hydrated = True
 
     async def save(self, run: RunRecord) -> None:
         async with self._lock:
@@ -253,10 +317,12 @@ class RunRepository:
 
     async def get(self, run_id: str) -> Optional[RunRecord]:
         async with self._lock:
+            self._hydrate_from_disk()
             return self._runs.get(run_id)
 
     async def list_runs(self, limit: int = 50) -> List[RunRecord]:
         async with self._lock:
+            self._hydrate_from_disk()
             runs = sorted(self._runs.values(), key=lambda r: r.started_at, reverse=True)
             return runs[:limit]
 
