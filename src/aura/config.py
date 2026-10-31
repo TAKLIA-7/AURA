@@ -67,19 +67,34 @@ class AURAConfig(BaseModel):
         if google_key and ("your-" in google_key.lower() or not google_key.strip()):
             google_key = None
 
-        # Determine LLM Provider
-        llm_provider = os.getenv("AGENT_PROVIDER") or os.getenv("AURA_LLM_PROVIDER")
-        if not llm_provider or (llm_provider == "openrouter" and not openrouter_key) or (llm_provider == "gemini" and not google_key):
-            if google_key:
-                llm_provider = "gemini"
-            elif openrouter_key:
-                llm_provider = "openrouter"
-            else:
-                llm_provider = "mock"
+        # Determine LLM Provider & Model with dynamic alias resolution
+        from aura.multiagent.llm_factory import resolve_model_name, MODELS
+        model_env = os.getenv("AURA_MODEL") or os.getenv("MODEL") or os.getenv("OPENROUTER_MODEL")
+        llm_provider = (os.getenv("AGENT_PROVIDER") or os.getenv("AURA_LLM_PROVIDER") or "").lower()
 
-        llm_model = os.getenv("GEMINI_MODEL") or os.getenv("AURA_LLM_MODEL")
-        if not llm_model or llm_model == "gemini-2.0-flash":
-            llm_model = "gemini-3.5-flash-lite" if llm_provider == "gemini" else ("google/gemini-2.0-flash-001" if llm_provider == "openrouter" else "mock-agent")
+        if model_env:
+            resolved_model = resolve_model_name(model_env)
+            if resolved_model.startswith("gemini"):
+                llm_provider = "gemini"
+                llm_model = resolved_model
+            else:
+                llm_provider = "openrouter"
+                llm_model = resolved_model
+        else:
+            if not llm_provider:
+                if openrouter_key:
+                    llm_provider = "openrouter"
+                elif google_key:
+                    llm_provider = "gemini"
+                else:
+                    llm_provider = "mock"
+
+            if llm_provider == "openrouter":
+                llm_model = os.getenv("OPENROUTER_MODEL") or os.getenv("AURA_LLM_MODEL") or MODELS.get("D", "deepseek/deepseek-chat")
+            elif llm_provider == "gemini":
+                llm_model = os.getenv("GEMINI_MODEL") or os.getenv("AURA_LLM_MODEL") or "gemini-2.5-flash"
+            else:
+                llm_model = os.getenv("AURA_LLM_MODEL") or "mock-agent"
 
         llm_key = openrouter_key if llm_provider == "openrouter" else google_key
 
@@ -89,6 +104,7 @@ class AURAConfig(BaseModel):
             api_key=llm_key,
             base_url=os.getenv("AURA_LLM_BASE_URL") or ("https://openrouter.ai/api/v1" if llm_provider == "openrouter" else None),
         )
+
 
         # Determine JEV Provider and Mock mode
         decision_engine = (os.getenv("DECISION_ENGINE") or os.getenv("AURA_JEV_PROVIDER") or "").lower()

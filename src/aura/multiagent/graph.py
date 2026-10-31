@@ -8,9 +8,9 @@ from aura.multiagent.agents import SpecializedAgents
 from aura.sdk.interceptor import AuraGovernor
 
 
-def build_multiagent_graph(governor: Optional[AuraGovernor] = None):
+def build_multiagent_graph(governor: Optional[AuraGovernor] = None, model_name: Optional[str] = None):
     """Constructs and compiles the governed multi-agent LangGraph workflow."""
-    agents = SpecializedAgents(governor=governor)
+    agents = SpecializedAgents(governor=governor, model_name=model_name)
     workflow = StateGraph(MultiAgentState)
 
     # 1. Add Agent Nodes

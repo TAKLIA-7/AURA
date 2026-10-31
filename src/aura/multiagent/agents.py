@@ -11,9 +11,10 @@ from aura.sdk.interceptor import AuraGovernor
 class SpecializedAgents:
     """Specialized agents coordinated by the Supervisor. All tool execution routes through AuraGovernor."""
 
-    def __init__(self, governor: Optional[AuraGovernor] = None) -> None:
+    def __init__(self, governor: Optional[AuraGovernor] = None, model_name: Optional[str] = None) -> None:
         self.governor = governor or AuraGovernor()
-        self.llm = get_llm()
+        self.model_name = model_name
+        self.llm = get_llm(model_name=model_name)
 
     async def supervisor_node(self, state: MultiAgentState) -> Dict[str, Any]:
         """Supervisor decides delegation path."""

@@ -27,10 +27,22 @@ Examples:
     parser.add_argument("--no-color", action="store_true", help="Disable color output")
     parser.add_argument("--data-dir", default=None, help="Override data directory")
     parser.add_argument("--multiagent", nargs="?", const="default", help="Run with LangGraph multi-agent governor")
+    parser.add_argument("--model", "-m", default=None, help="Select model alias (A, B, C, D, gemini) or model slug")
+    parser.add_argument("--list-models", action="store_true", help="List available switchable model aliases")
     parser.add_argument("--policies", action="store_true", help="Display active organizational policies from SQLite")
     parser.add_argument("--mcp", action="store_true", help="Run as Model Context Protocol (MCP) server")
     parser.add_argument("--ingest", nargs=2, metavar=("FILE", "TITLE"), help="Ingest a policy document into Pinecone RAG")
     args = parser.parse_args()
+
+    if args.list_models:
+        from aura.multiagent.llm_factory import MODELS
+        print("\n=== AURA Switchable Model Registry ===")
+        for key, slug in MODELS.items():
+            print(f"  [{key}] -> {slug}")
+        print("\nUsage:")
+        print("  aura --model A --multiagent \"prompt\"")
+        print("  or set MODEL=A in your .env file\n")
+        sys.exit(0)
 
     if args.mock:
         os.environ["AURA_JEV_MOCK_MODE"] = "true"
@@ -39,6 +51,9 @@ Examples:
         os.environ["AURA_NO_COLOR"] = "true"
     if args.data_dir:
         os.environ["AURA_DATA_DIR"] = args.data_dir
+    if args.model:
+        os.environ["AURA_MODEL"] = args.model
+
 
     # 1. Policies CLI Inspector
     if args.policies:
@@ -89,9 +104,14 @@ Examples:
     if args.multiagent:
         prompt = args.multiagent if args.multiagent != "default" else "List departments and top salaries"
         from aura.multiagent.orchestrator import MultiAgentOrchestrator
-        orchestrator = MultiAgentOrchestrator()
+        from aura.multiagent.llm_factory import resolve_model_name
+        model_selection = args.model or os.getenv("MODEL") or os.getenv("OPENROUTER_MODEL")
+        orchestrator = MultiAgentOrchestrator(model_name=model_selection)
+        resolved = resolve_model_name(model_selection)
         print(f"\n=== AURA Multi-Agent Governance Execution ===")
+        print(f"Active Model: {resolved} (Alias/Key: {model_selection or 'default'})")
         print(f"Prompt: {prompt}\n")
+
         async def run_cli():
             async for msg in orchestrator.run(prompt):
                 if msg.kind == "agent_thought":

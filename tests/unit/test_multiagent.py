@@ -73,3 +73,15 @@ async def test_multiagent_intercepts_approval(multi_governor: AuraGovernor):
     kinds = [m.kind for m in messages]
     assert "run_started" in kinds
     assert "run_completed" in kinds
+
+
+def test_switchable_model_resolution():
+    from aura.multiagent.llm_factory import resolve_model_name, MODELS
+    assert resolve_model_name("A") == "bytedance-seed/seedream-4.5"
+    assert resolve_model_name("B") == "anthropic/claude-haiku-4.5"
+    assert resolve_model_name("C") == "tecent/hy3"
+    assert resolve_model_name("D") == "deepseek/deepseek-chat"
+    assert resolve_model_name("gemini") == "gemini-2.5-flash"
+    # Arbitrary slugs pass through directly
+    assert resolve_model_name("custom/org-model-v1") == "custom/org-model-v1"
+

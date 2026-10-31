@@ -320,26 +320,40 @@ class OpenRouterJEVClient:
                     }
                 },
             }
-            async with httpx.AsyncClient(timeout=t) as client:
-                resp = await client.post(
-                    decisions_url,
-                    headers=self._headers(),
-                    json=dec_payload,
-                )
-                if getattr(resp, "status_code", None) == 401:
-                    return JEVAssessment(
-                        assessment_id=f"jev_fallback_{uuid.uuid4().hex[:6]}",
-                        request_id=payload.request_id,
-                        risk_level=RiskLevel.MEDIUM,
-                        risk_factors=["openrouter_401_unauthorized"],
-                        evidence=["OpenRouter API returned 401 Unauthorized. Check OPENROUTER_API_KEY in .env."],
-                        recommended_action=DecisionResult.APPROVAL_REQUIRED,
-                        requires_human_review=True,
-                        provider="mock_fallback",
-                        latency_ms=(time.monotonic() - start) * 1000,
+            try:
+                async with httpx.AsyncClient(timeout=t) as client:
+                    resp = await client.post(
+                        decisions_url,
+                        headers=self._headers(),
+                        json=dec_payload,
                     )
-                resp.raise_for_status()
-                data = resp.json()
+                    if getattr(resp, "status_code", None) == 401:
+                        return JEVAssessment(
+                            assessment_id=f"jev_fallback_{uuid.uuid4().hex[:6]}",
+                            request_id=payload.request_id,
+                            risk_level=RiskLevel.MEDIUM,
+                            risk_factors=["openrouter_401_unauthorized"],
+                            evidence=["OpenRouter API returned 401 Unauthorized. Check OPENROUTER_API_KEY in .env."],
+                            recommended_action=DecisionResult.APPROVAL_REQUIRED,
+                            requires_human_review=True,
+                            provider="mock_fallback",
+                            latency_ms=(time.monotonic() - start) * 1000,
+                        )
+                    resp.raise_for_status()
+                    data = resp.json()
+            except Exception as e:
+                return JEVAssessment(
+                    assessment_id=f"jev_failclose_{uuid.uuid4().hex[:6]}",
+                    request_id=payload.request_id,
+                    risk_level=RiskLevel.MEDIUM,
+                    risk_factors=["jev_remote_error"],
+                    evidence=[f"JEV live evaluation fallback: {e}. Failing closed with required review."],
+                    recommended_action=DecisionResult.APPROVAL_REQUIRED,
+                    requires_human_review=True,
+                    provider="fail_closed_guard",
+                    latency_ms=(time.monotonic() - start) * 1000,
+                )
+
 
             latency_ms = (time.monotonic() - start) * 1000
             score_data = data.get("answers", {}).get("risk_score", {})
@@ -401,35 +415,49 @@ class OpenRouterJEVClient:
             f"Session Context: {json.dumps(payload.session)}\n"
             f"Policy Context: {json.dumps(payload.policy_context)}\n"
         )
-        async with httpx.AsyncClient(timeout=t) as client:
-            resp = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.1,
-                    "response_format": {"type": "json_object"},
-                },
-            )
-            if getattr(resp, "status_code", None) == 401:
-                return JEVAssessment(
-                    assessment_id=f"jev_fallback_{uuid.uuid4().hex[:6]}",
-                    request_id=payload.request_id,
-                    risk_level=RiskLevel.MEDIUM,
-                    risk_factors=["openrouter_401_unauthorized"],
-                    evidence=["OpenRouter API returned 401 Unauthorized. Check OPENROUTER_API_KEY in .env."],
-                    recommended_action=DecisionResult.APPROVAL_REQUIRED,
-                    requires_human_review=True,
-                    provider="mock_fallback",
-                    latency_ms=(time.monotonic() - start) * 1000,
+        try:
+            async with httpx.AsyncClient(timeout=t) as client:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json={
+                        "model": self.model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": 0.1,
+                        "response_format": {"type": "json_object"},
+                    },
                 )
+                if getattr(resp, "status_code", None) == 401:
+                    return JEVAssessment(
+                        assessment_id=f"jev_fallback_{uuid.uuid4().hex[:6]}",
+                        request_id=payload.request_id,
+                        risk_level=RiskLevel.MEDIUM,
+                        risk_factors=["openrouter_401_unauthorized"],
+                        evidence=["OpenRouter API returned 401 Unauthorized. Check OPENROUTER_API_KEY in .env."],
+                        recommended_action=DecisionResult.APPROVAL_REQUIRED,
+                        requires_human_review=True,
+                        provider="mock_fallback",
+                        latency_ms=(time.monotonic() - start) * 1000,
+                    )
 
-            resp.raise_for_status()
-            data = resp.json()
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as e:
+            return JEVAssessment(
+                assessment_id=f"jev_failclose_{uuid.uuid4().hex[:6]}",
+                request_id=payload.request_id,
+                risk_level=RiskLevel.MEDIUM,
+                risk_factors=["jev_remote_chat_error"],
+                evidence=[f"JEV live chat assessment error: {e}. Failing closed with required review."],
+                recommended_action=DecisionResult.APPROVAL_REQUIRED,
+                requires_human_review=True,
+                provider="fail_closed_guard",
+                latency_ms=(time.monotonic() - start) * 1000,
+            )
+
 
 
         latency_ms = (time.monotonic() - start) * 1000

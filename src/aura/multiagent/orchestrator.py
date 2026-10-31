@@ -16,9 +16,10 @@ class MultiAgentOrchestrator:
     compatibility with AURA's event bus, runs repository, and TUI.
     """
 
-    def __init__(self, governor: Optional[AuraGovernor] = None) -> None:
+    def __init__(self, governor: Optional[AuraGovernor] = None, model_name: Optional[str] = None) -> None:
         self.governor = governor or AuraGovernor()
-        self.app = build_multiagent_graph(governor=self.governor)
+        self.model_name = model_name
+        self.app = build_multiagent_graph(governor=self.governor, model_name=model_name)
         self.event_bus = get_event_bus()
         self.run_repo = get_run_repo()
         self.session_id = f"session_multi_{uuid.uuid4().hex[:8]}"
@@ -30,13 +31,16 @@ class MultiAgentOrchestrator:
         role: str = "analyst",
     ) -> AsyncGenerator[AgentMessage, None]:
         """Runs the multi-agent graph and yields streaming AgentMessages."""
+        from aura.multiagent.llm_factory import resolve_model_name
+        active_model = resolve_model_name(self.model_name)
         run = RunRecord(
             session_id=self.session_id,
             user_prompt=prompt,
             provider="langgraph-multiagent",
-            model=getattr(self.governor.config.llm, "model", "multiagent-team"),
+            model=active_model,
         )
         await self.run_repo.save(run)
+
 
         await self.event_bus.emit(AuditEvent(
             level=EventLevel.INFO,
